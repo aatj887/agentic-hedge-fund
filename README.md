@@ -1,4 +1,3 @@
-```markdown
 # 🤖 Autonomous Hedge Fund: A Multi-Agent Trading System
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=flat-square&logo=python)
@@ -162,4 +161,3 @@ It is not financial advice. Trading involves substantial risk of loss and is not
 ## 📜 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-```

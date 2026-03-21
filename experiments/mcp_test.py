@@ -1,5 +1,8 @@
 import asyncio
 import os
+import socket
+import subprocess
+import time
 import traceback
 from typing import Any, Dict, Type
 from dotenv import load_dotenv, find_dotenv
@@ -9,8 +12,41 @@ from langchain.agents import create_agent
 from langchain_core.tools import StructuredTool, BaseTool
 from pydantic import BaseModel, ConfigDict, Field, create_model
 
-load_dotenv('.env')
+load_dotenv(find_dotenv())
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
+
+MCP_HOST = "127.0.0.1"
+MCP_PORT = 6950
+MCP_CATEGORIES = "equity,news,economy"
+
+
+def start_mcp_server() -> subprocess.Popen:
+    """Start openbb-mcp in SSE mode and return the process handle."""
+    proc = subprocess.Popen(
+        [
+            "openbb-mcp",
+            "--transport", "sse",
+            "--host", MCP_HOST,
+            "--port", str(MCP_PORT),
+            "--default-categories", MCP_CATEGORIES,
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    return proc
+
+
+def wait_for_server(timeout: int = 120) -> bool:
+    """Poll until the server port is open and accepting connections."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            with socket.create_connection((MCP_HOST, MCP_PORT), timeout=2):
+                return True
+        except OSError:
+            pass
+        time.sleep(2)
+    return False
 
 # 1. Schema Sanitization Logic
 def sanitize_schema_for_google(schema_dict: Dict[str, Any]) -> Dict[str, Any]:
@@ -63,7 +99,14 @@ def _build_pydantic_model(schema_dict: Dict[str, Any], tool_name: str) -> type[B
         if field_type_str == "integer": py_type = int
         elif field_type_str == "number": py_type = float
         elif field_type_str == "boolean": py_type = bool
-        elif field_type_str == "array": py_type = list
+        elif field_type_str == "array":
+            items = field_info.get("items", {})
+            items_type_str = items.get("type", "string") if isinstance(items, dict) else "string"
+            if items_type_str == "integer": items_py_type = int
+            elif items_type_str == "number": items_py_type = float
+            elif items_type_str == "boolean": items_py_type = bool
+            else: items_py_type = str
+            py_type = list[items_py_type]
         elif field_type_str == "object": py_type = dict
         else: py_type = str
         
@@ -135,18 +178,29 @@ async def main():
         api_key=GOOGLE_API_KEY
     )
 
-    client = MultiServerMCPClient(
-        {
-            "openbb": {
-                "transport": "http",
-                "url": "http://127.0.0.1:6950/mcp",
-            }
-        }
-    )
+    print("Starting OpenBB MCP server...")
+    server_proc = start_mcp_server()
 
-    print("Connecting to MCP server and loading tools...")
-    
     try:
+        print("Waiting for server to be ready (this may take ~60s)...")
+        if not wait_for_server(timeout=120):
+            print("Error: MCP server did not start in time.")
+            server_proc.terminate()
+            return
+
+        print("Server ready.")
+
+        client = MultiServerMCPClient(
+            {
+                "openbb": {
+                    "transport": "sse",
+                    "url": f"http://{MCP_HOST}:{MCP_PORT}/sse",
+                }
+            }
+        )
+
+        print("Connecting to MCP server and loading tools...")
+
         # 3. Load and Wrap Tools
         raw_tools = await client.get_tools()
         print(f"Loaded {len(raw_tools)} raw tools.")
@@ -158,7 +212,7 @@ async def main():
         # 4. Create Agent
         agent = create_agent(llm, safe_tools)
 
-        user_query = "What is the latest closing price for Apple (AAPL)?"
+        user_query = "What are the 5 latest closing price for Apple (AAPL)?"
         print(f"Invoking agent with query: {user_query}")
 
         response = await agent.ainvoke(
@@ -167,8 +221,8 @@ async def main():
 
         final_message = response["messages"][-1]
         print("\n--- Agent Response ---")
-        print(final_message.content)
-            
+        print(final_message.content[0]['text'])
+
     except* Exception as e:
         print("\n--- AN ERROR OCCURRED ---")
         for exc in e.exceptions:
@@ -176,6 +230,8 @@ async def main():
             print(f"Error Msg:  {exc}")
             traceback.print_exception(type(exc), exc, exc.__traceback__)
             break
+    finally:
+        server_proc.terminate()
 
 if __name__ == "__main__":
     try:

@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:mcp.so)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:lmstudio.ai)",
+      "WebSearch",
+      "WebFetch(domain:docs.openbb.co)",
+      "WebFetch(domain:openbb.co)",
+      "WebFetch(domain:libraries.io)",
+      "WebFetch(domain:socket.dev)",
+      "WebFetch(domain:didierlopes.com)",
+      "Bash(curl -s \"https://pypi.org/pypi/openbb-mcp-server/json\")",
+      "Bash(python3 -c \":*)",
+      "Bash(curl -s https://pypi.org/pypi/openbb-mcp/json)",
+      "Bash(openbb-mcp:*)"
+    ]
+  }
+}
